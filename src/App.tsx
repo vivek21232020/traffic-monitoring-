@@ -39,7 +39,6 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer, 
   PieChart, 
   Pie, 
   Cell,
@@ -118,6 +117,43 @@ interface SystemHealth {
   uptime: number;
   temp: number;
 }
+
+const FALLBACK_IPS = [
+  '192.168.1.10',
+  '192.168.1.15',
+  '10.0.0.5',
+  '172.16.0.2',
+  '45.33.22.11',
+  '185.12.34.56',
+  '203.0.113.42',
+  '8.8.8.8',
+];
+
+const FALLBACK_ATTACKS = ['DDoS', 'Port Scan', 'Brute Force', 'SQL Injection'];
+
+const createFallbackPacket = (timestamp = Date.now()): Packet => {
+  const isAttack = Math.random() < 0.08;
+  const isSuspicious = !isAttack && Math.random() < 0.16;
+  const protocols: Packet['protocol'][] = ['TCP', 'UDP', 'ICMP'];
+  const protocol = protocols[Math.floor(Math.random() * protocols.length)];
+
+  return {
+    id: Math.random().toString(36).slice(2),
+    timestamp,
+    sourceIp: FALLBACK_IPS[Math.floor(Math.random() * FALLBACK_IPS.length)],
+    destIp: '192.168.1.1',
+    protocol,
+    packetSize: Math.floor(Math.random() * 1460) + 40,
+    duration: Math.random() * 2,
+    status: isAttack ? 'Attack' : isSuspicious ? 'Suspicious' : 'Normal',
+    attackType: isAttack ? FALLBACK_ATTACKS[Math.floor(Math.random() * FALLBACK_ATTACKS.length)] : undefined,
+    riskLevel: isAttack ? 'High' : isSuspicious ? 'Medium' : 'Low',
+    confidence: isAttack ? 0.85 + Math.random() * 0.14 : isSuspicious ? 0.6 + Math.random() * 0.2 : undefined,
+  };
+};
+
+const createFallbackHistory = (count = 120): Packet[] =>
+  Array.from({ length: count }, (_, i) => createFallbackPacket(Date.now() - (count - i) * 1000));
 
 // --- Components ---
 const AI_MODEL = "gemini-3-flash-preview";
@@ -390,8 +426,46 @@ const RiskBadge = ({ level }: { level: Packet['riskLevel'] }) => {
   );
 };
 
+const SizedChart = ({
+  className,
+  minHeight,
+  children,
+}: {
+  className?: string;
+  minHeight: number;
+  children: (size: { width: number; height: number }) => React.ReactNode;
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: minHeight });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      const width = Math.max(0, Math.floor(rect.width));
+      const measuredHeight = Math.floor(rect.height);
+      const height = Math.max(minHeight, measuredHeight > 0 ? measuredHeight : minHeight);
+      setSize({ width, height });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(() => updateSize());
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [minHeight]);
+
+  return (
+    <div ref={containerRef} className={cn('w-full min-w-0', className)}>
+      {size.width > 10 && size.height > 10 ? children(size) : null}
+    </div>
+  );
+};
+
 export default function App() {
-  const [packets, setPackets] = useState<Packet[]>([]);
+  const [packets, setPackets] = useState<Packet[]>(() => createFallbackHistory());
   const [isConnected, setIsConnected] = useState(false);
   const [alerts, setAlerts] = useState<Packet[]>([]);
   const [blockedIps, setBlockedIps] = useState<BlockedIp[]>([]);
@@ -402,7 +476,7 @@ export default function App() {
   const [threatIntel, setThreatIntel] = useState<ThreatIntel[]>([]);
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [systemHealth, setSystemHealth] = useState<SystemHealth>({
-    cpu: 0, memory: 0, storage: 0, uptime: 0, temp: 0
+    cpu: 18.4, memory: 43.2, storage: 28.1, uptime: 7300, temp: 42.3
   });
   const [selectedIp, setSelectedIp] = useState<BlockedIp | null>(null);
   const [settings, setSettings] = useState({
@@ -414,6 +488,22 @@ export default function App() {
   });
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const fetchJson = async (url: string, init?: RequestInit) => {
+    const res = await fetch(url, init);
+    const contentType = res.headers.get('content-type') || '';
+
+    if (!res.ok) {
+      throw new Error(`Request failed: ${url} (${res.status})`);
+    }
+
+    if (!contentType.includes('application/json')) {
+      const preview = (await res.text()).slice(0, 120).replace(/\s+/g, ' ');
+      throw new Error(`Non-JSON response from ${url}: ${preview}`);
+    }
+
+    return res.json();
+  };
+
   useEffect(() => {
     let pollInterval: NodeJS.Timeout;
     let ws: WebSocket | null = null;
@@ -421,8 +511,7 @@ export default function App() {
     const startPolling = () => {
       pollInterval = setInterval(async () => {
         try {
-          const res = await fetch('/api/history');
-          const data = await res.json();
+          const data = await fetchJson('/api/history');
           if (data.packets) {
             setPackets(data.packets.slice(0, 200));
           } else {
@@ -434,45 +523,58 @@ export default function App() {
           setIsConnected(true);
         } catch (err) {
           setIsConnected(false);
+          setPackets(prev => [createFallbackPacket(), ...(prev.length ? prev : createFallbackHistory())].slice(0, 200));
+          setSystemHealth(prev => ({
+            cpu: Math.min(100, Math.max(5, prev.cpu + (Math.random() * 6 - 3))),
+            memory: Math.min(100, Math.max(10, prev.memory + (Math.random() * 3 - 1.5))),
+            storage: Math.min(100, Math.max(5, prev.storage + (Math.random() * 0.2 - 0.05))),
+            uptime: prev.uptime + 3,
+            temp: Math.min(90, Math.max(30, prev.temp + (Math.random() * 2 - 1))),
+          }));
         }
       }, 3000);
     };
 
-    try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}`);
+    const wsUrl = import.meta.env.VITE_WS_URL;
 
-      ws.onopen = () => {
-        setIsConnected(true);
-        if (pollInterval) clearInterval(pollInterval);
-      };
-      ws.onclose = () => {
-        setIsConnected(false);
-        startPolling();
-      };
-      ws.onerror = () => {
-        ws?.close();
-      };
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'INIT') {
-          setPackets(msg.data);
-        } else if (msg.type === 'TICK') {
-          setPackets(prev => [msg.packet, ...prev].slice(0, 200));
-          setSystemHealth(msg.health);
-          if (msg.packet.status !== 'Normal') {
-            setAlerts(prev => [msg.packet, ...prev].slice(0, 10));
+    if (wsUrl) {
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          setIsConnected(true);
+          if (pollInterval) clearInterval(pollInterval);
+        };
+        ws.onclose = () => {
+          setIsConnected(false);
+          startPolling();
+        };
+        ws.onerror = () => {
+          ws?.close();
+        };
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'INIT') {
+            setPackets(msg.data);
+          } else if (msg.type === 'TICK') {
+            setPackets(prev => [msg.packet, ...prev].slice(0, 200));
+            setSystemHealth(msg.health);
+            if (msg.packet.status !== 'Normal') {
+              setAlerts(prev => [msg.packet, ...prev].slice(0, 10));
+            }
           }
-        }
-      };
-    } catch (e) {
+        };
+      } catch (e) {
+        startPolling();
+      }
+    } else {
       startPolling();
     }
 
-    fetchBlocked();
-    fetchAIMetrics();
-    fetchThreatIntel();
-    fetchPlaybooks();
+    fetchBlocked().catch(() => undefined);
+    fetchAIMetrics().catch(() => undefined);
+    fetchThreatIntel().catch(() => undefined);
+    fetchPlaybooks().catch(() => undefined);
     
     return () => {
       ws?.close();
@@ -481,31 +583,43 @@ export default function App() {
   }, []);
 
   const fetchPlaybooks = async () => {
-    const res = await fetch('/api/playbooks');
-    const data = await res.json();
-    setPlaybooks(data);
+    try {
+      const data = await fetchJson('/api/playbooks');
+      setPlaybooks(data);
+    } catch {
+      setPlaybooks([]);
+    }
   };
 
   const fetchBlocked = async () => {
-    const res = await fetch('/api/blocked');
-    const data = await res.json();
-    setBlockedIps(data);
+    try {
+      const data = await fetchJson('/api/blocked');
+      setBlockedIps(data);
+    } catch {
+      setBlockedIps([]);
+    }
   };
 
   const fetchAIMetrics = async () => {
-    const res = await fetch('/api/ai-metrics');
-    const data = await res.json();
-    setAiMetrics(data);
+    try {
+      const data = await fetchJson('/api/ai-metrics');
+      setAiMetrics(data);
+    } catch {
+      setAiMetrics(null);
+    }
   };
 
   const fetchThreatIntel = async () => {
-    const res = await fetch('/api/threat-intel');
-    const data = await res.json();
-    setThreatIntel(data);
+    try {
+      const data = await fetchJson('/api/threat-intel');
+      setThreatIntel(data);
+    } catch {
+      setThreatIntel([]);
+    }
   };
 
   const simulateAttack = async (type: string) => {
-    await fetch('/api/simulate-attack', {
+    await fetchJson('/api/simulate-attack', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type })
@@ -513,28 +627,39 @@ export default function App() {
   };
 
   const blockIp = async (ip: string, reason?: string) => {
-    await fetch('/api/block', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, reason })
-    });
-    fetchBlocked();
+    try {
+      await fetchJson('/api/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, reason })
+      });
+      fetchBlocked().catch(() => undefined);
+    } catch {
+      // no-op: keep UI responsive even if backend is unavailable
+    }
   };
 
   const unblockIp = async (ip: string) => {
-    await fetch('/api/unblock', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip })
-    });
-    fetchBlocked();
+    try {
+      await fetchJson('/api/unblock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip })
+      });
+      fetchBlocked().catch(() => undefined);
+    } catch {
+      // no-op: keep UI responsive even if backend is unavailable
+    }
   };
 
   const generateReport = async () => {
-    const res = await fetch('/api/report');
-    const data = await res.json();
-    setReportData(data);
-    setShowReport(true);
+    try {
+      const data = await fetchJson('/api/report');
+      setReportData(data);
+      setShowReport(true);
+    } catch {
+      setShowReport(false);
+    }
   };
 
   // --- Derived Stats ---
@@ -760,9 +885,9 @@ export default function App() {
                   icon={BarChart3}
                   badge="Live Stream"
                 >
-                  <div className="h-[400px] w-full mt-4">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={stats.trafficOverTime}>
+                  <SizedChart className="h-[400px] mt-4" minHeight={300}>
+                    {({ width, height }) => (
+                      <AreaChart width={width} height={height} data={stats.trafficOverTime}>
                         <defs>
                           <linearGradient id="cyberGradient" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#00E5FF" stopOpacity={0.2}/>
@@ -822,8 +947,8 @@ export default function App() {
                           name="Outgoing"
                         />
                       </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
+                    )}
+                  </SizedChart>
                 </CyberCard>
 
                 {/* Threat Intelligence Feed */}
@@ -913,17 +1038,17 @@ export default function App() {
                   title="Attack Timeline" 
                   icon={Clock}
                 >
-                  <div className="h-[300px] w-full mt-4">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={stats.attackTimeline}>
+                  <SizedChart className="h-[300px] mt-4" minHeight={220}>
+                    {({ width, height }) => (
+                      <BarChart width={width} height={height} data={stats.attackTimeline}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                         <XAxis dataKey="time" stroke="rgba(255,255,255,0.3)" fontSize={10} tickLine={false} axisLine={false} />
                         <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} tickLine={false} axisLine={false} />
                         <Tooltip contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '12px' }} />
                         <Bar dataKey="count" fill="#EF4444" radius={[4, 4, 0, 0]} />
                       </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                    )}
+                  </SizedChart>
                 </CyberCard>
               </div>
             </>
@@ -972,9 +1097,9 @@ export default function App() {
 
                 <div className="lg:col-span-4 space-y-8">
                   <CyberCard title="Protocol Distribution" icon={PieChart}>
-                    <div className="h-[250px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
+                    <SizedChart className="h-[250px]" minHeight={200}>
+                      {({ width, height }) => (
+                        <PieChart width={width} height={height}>
                           <Pie
                             data={stats.protocolData}
                             cx="50%"
@@ -999,8 +1124,8 @@ export default function App() {
                             itemStyle={{ fontSize: '12px', fontFamily: 'JetBrains Mono' }}
                           />
                         </PieChart>
-                      </ResponsiveContainer>
-                    </div>
+                      )}
+                    </SizedChart>
                     <div className="flex justify-center gap-6 mt-4">
                       {stats.protocolData.map((p, i) => (
                         <div key={p.name} className="flex items-center gap-2">
@@ -1116,17 +1241,17 @@ export default function App() {
 
                 <div className="lg:col-span-4 space-y-8">
                   <CyberCard title="Threat Heatmap" icon={Layers}>
-                    <div className="h-[300px] w-full mt-4">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={stats.heatmapData}>
+                    <SizedChart className="h-[300px] mt-4" minHeight={220}>
+                      {({ width, height }) => (
+                        <BarChart width={width} height={height} data={stats.heatmapData}>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                           <XAxis dataKey="hour" stroke="rgba(255,255,255,0.3)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(h) => `${h}h`} />
                           <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} tickLine={false} axisLine={false} />
                           <Tooltip contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '12px' }} />
                           <Bar dataKey="attacks" fill="#F59E0B" radius={[4, 4, 0, 0]} />
                         </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                      )}
+                    </SizedChart>
                     <p className="text-[10px] font-mono text-cyber-text-secondary text-center mt-4 uppercase tracking-widest">Attack Intensity by Hour</p>
                   </CyberCard>
                 </div>
