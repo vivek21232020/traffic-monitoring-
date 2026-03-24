@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-cyber-bg: #0B1220;
+  --color-cyber-card: #1F2937;
+  --color-cyber-border: #374151;
+  --color-cyber-accent: #00E5FF;
+  --color-cyber-secondary: #3B82F6;
+  --color-cyber-danger: #EF4444;
+  --color-cyber-warning: #F59E0B;
+  --color-cyber-success: #22C55E;
+  --color-cyber-info: #38BDF8;
+  --color-cyber-text-primary: #E5E7EB;
+  --color-cyber-text-secondary: #9CA3AF;
+  --color-cyber-text-disabled: #6B7280;
+  --color-cyber-sidebar: #111827;
+  --color-cyber-sidebar-hover: #1F2937;
+}
+
+@layer base {
+  body {
+    @apply bg-cyber-bg text-cyber-text-primary antialiased selection:bg-cyber-accent/20 selection:text-cyber-accent;
+    background-image: 
+      radial-gradient(circle at 50% -20%, rgba(0, 229, 255, 0.05), transparent),
+      radial-gradient(circle at 0% 100%, rgba(59, 130, 246, 0.03), transparent);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-cyber-card backdrop-blur-xl border border-cyber-border rounded-2xl shadow-[0_0_20px_rgba(0,229,255,0.05)];
+  }
+  
+  .cyber-grid {
+    background-size: 40px 40px;
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  }
+
+  .glow-text {
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+  }
+
+  .scanline {
+    width: 100%;
+    height: 100px;
+    z-index: 10;
+    background: linear-gradient(0deg, rgba(0, 229, 255, 0) 0%, rgba(0, 229, 255, 0.01) 50%, rgba(0, 229, 255, 0) 100%);
+    opacity: 0.1;
+    position: absolute;
+    bottom: 100%;
+    animation: scanline 8s linear infinite;
+  }
+}
+
+@keyframes scanline {
+  0% { bottom: 100%; }
+  100% { bottom: -100px; }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-cyber-accent);
+}

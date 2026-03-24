@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NetSentinel">
+  <rect width="64" height="64" rx="12" fill="#0B1220"/>
+  <path d="M32 8 12 18v14c0 14 8.8 22.8 20 26 11.2-3.2 20-12 20-26V18L32 8Zm0 8 12 6.1V32c0 9.7-5.8 16-12 18.4C25.8 48 20 41.7 20 32V22.1L32 16Z" fill="#00E5FF"/>
+  <path d="M31 24h2v16h-2zM24 31h16v2H24z" fill="#22C55E"/>
+</svg>
